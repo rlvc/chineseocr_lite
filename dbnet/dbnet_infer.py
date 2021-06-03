@@ -1,8 +1,10 @@
+import os
 import onnxruntime as rt
 import  numpy as np
 import time
 import cv2
 from .decode import  SegDetectorRepresenter
+import TopsInference
 
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
@@ -44,7 +46,13 @@ def draw_bbox(img_path, result, color=(255, 0, 0), thickness=2):
 class DBNET(metaclass=SingletonType):
     def __init__(self, MODEL_PATH):
         self.sess = rt.InferenceSession(MODEL_PATH)
-
+        self.engine_name_template = MODEL_PATH.replace('.onnx', '') + \
+            ('_bs{{}}_h{{}}_w{{}}_{}.exec').\
+            format(TopsInference.__version__.replace(' ', ''))
+        self.engine_name = ""
+        self.model_path = MODEL_PATH
+        self.handle = TopsInference.set_device(0, 0)
+        self.engine = TopsInference.PyEngine()
         self.decode_handel = SegDetectorRepresenter()
 
     def process(self, img, short_size):
@@ -76,8 +84,40 @@ class DBNET(metaclass=SingletonType):
         img /= std
         img = img.transpose(2, 0, 1)
         transformed_image = np.expand_dims(img, axis=0)
-        out = self.sess.run(["out1"], {"input0": transformed_image.astype(np.float32)})
+        print("========================DBNET transformed_image.shape = {}".format(transformed_image.shape))
+        engine_model_name = self.engine_name_template.format(
+            transformed_image.shape[0], transformed_image.shape[2], transformed_image.shape[3])
+        if os.path.isfile(engine_model_name):
+            if self.engine_name == engine_model_name:
+                print("[DEBUG] Already load suitable enflame bin {}".format(engine_model_name))
+            else:
+                self.engine = TopsInference.load(engine_model_name)
+                self.engine_name = engine_model_name
+                print("Find engine file \'{}\'. Skip build engine.".format(
+                    engine_model_name))
+        else:
+            print("Fail to load model file:  {}".format(engine_model_name))
+            onnx_parser = TopsInference.create_parser(TopsInference.ONNX_MODEL)
+            onnx_parser.set_input_dtypes("DT_FLOAT32")
+            onnx_parser.set_input_shapes("1, 3, {}, {}".format(transformed_image.shape[2], transformed_image.shape[3]))
+            onnx_parser.set_input_names("input0")
+            onnx_parser.set_output_names("out1")
+            module = onnx_parser.read(self.model_path)
+            optimizer = TopsInference.create_optimizer()
+            print("build engine ...")
+            self.engine = optimizer.build(module)
+            print("build engine finished.")
+            self.engine.save_executable(engine_model_name)
+            self.engine_name = engine_model_name
+            print("save engine file: \'{}\'".format(engine_model_name))
+
+        out = []
+        self.engine.run([transformed_image.astype(np.float32, order='C')], out,
+                       TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
         box_list, score_list = self.decode_handel(out[0][0], h, w)
+        print("========================box_list.length = {}".format(len(box_list)))
+        print(box_list)
+        print("========================score_list.length = {}".format(len(score_list)))
         if len(box_list) > 0:
             idx = box_list.reshape(box_list.shape[0], -1).sum(axis=1) > 0  # 去掉全为0的框
             box_list, score_list = box_list[idx], score_list[idx]

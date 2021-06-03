@@ -1,5 +1,7 @@
 
 import os
+os.environ['ENFLAME_LOG_LEVEL'] = 'FATAL'
+os.environ['SDK_LOG_LEVEL'] = '3'
 import sys
 
 BASE_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

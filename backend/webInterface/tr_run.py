@@ -43,6 +43,7 @@ class TrRun(tornado.web.RequestHandler):
         400 没有请求参数
 
         '''
+        print("========================Enter Post")
         start_time = time.time()
         short_size = 960
         global now_time
@@ -55,11 +56,13 @@ class TrRun(tornado.web.RequestHandler):
         self.set_header('content-type', 'application/json')
         up_image_type = None
         if img_up is not None and len(img_up) > 0:
+            print("========================image")
             img_up = img_up[0]
             up_image_type = img_up.content_type
             up_image_name = img_up.filename
             img = Image.open(BytesIO(img_up.body))
         elif img_b64 is not None:
+            print("========================base64")
             raw_image = base64.b64decode(img_b64.encode('utf8'))
             img = Image.open(BytesIO(raw_image))
         else:
@@ -72,6 +75,7 @@ class TrRun(tornado.web.RequestHandler):
             if hasattr(img, '_getexif') and img._getexif() is not None:
                 orientation = 274
                 exif = dict(img._getexif().items())
+                print("========================exif: {}".format(exif[orientation]))
                 if orientation not in exif:
                     exif[orientation] = 0
                 if exif[orientation] == 3:
@@ -115,6 +119,7 @@ class TrRun(tornado.web.RequestHandler):
         if compress_size is not None:
             try:
                 compress_size = int(compress_size)
+                print("========================compress_size = {}".format(compress_size))
             except ValueError as ex:
                 # logger.error(exc_info=True)
                 res.append("短边尺寸参数类型有误，只能是int类型")

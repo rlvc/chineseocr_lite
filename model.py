@@ -30,24 +30,27 @@ class  OcrHandle(object):
         """
         results = []
         boxes_list = sorted_boxes(np.array(boxes_list))
+        print(boxes_list)
 
         line_imgs = []
         for index, (box, score) in enumerate(zip(boxes_list[:angle_detect_num], score_list[:angle_detect_num])):
             tmp_box = copy.deepcopy(box)
             partImg_array = get_rotate_crop_image(im, tmp_box.astype(np.float32))
+            print("partImg_array.shape = {}".format(partImg_array.shape))
             partImg = Image.fromarray(partImg_array).convert("RGB")
             line_imgs.append(partImg)
 
         angle_res = False
         if angle_detect:
             angle_res = self.angle_handle.predict_rbgs(line_imgs)
+        print("========================angle_res = {}".format(angle_res))
 
         count = 1
         for index, (box ,score) in enumerate(zip(boxes_list,score_list)):
 
             tmp_box = copy.deepcopy(box)
             partImg_array = get_rotate_crop_image(im, tmp_box.astype(np.float32))
-
+            print("partImg_array.shape = {}".format(partImg_array.shape))
 
             partImg = Image.fromarray(partImg_array).convert("RGB")
 

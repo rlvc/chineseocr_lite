@@ -1,14 +1,23 @@
 from PIL import  Image
 import numpy as np
 import cv2
-
+import TopsInference
 import onnxruntime as rt
 import time
+import os
 
 class AngleNetHandle:
     def __init__(self, model_path,size_h = 32, size_w = 192):
 
         self.sess = rt.InferenceSession(model_path)
+        self.engine_name_template = model_path.replace('.onnx', '') + \
+            ('_bs{{}}_h{{}}_w{{}}_{}.exec').\
+            format(TopsInference.__version__.replace(' ', ''))
+        self.engine_name = ""
+        self.model_path = model_path
+        print("Create AngleNet enflame binary template {}".format(self.engine_name_template))
+        self.handle = TopsInference.set_device(0, 0)
+        self.engine = TopsInference.PyEngine()
         self.size_h = size_h
         self.size_w = size_w
 
@@ -34,8 +43,36 @@ class AngleNetHandle:
         image = img.transpose(2, 0, 1)
         transformed_image = np.expand_dims(image, axis=0)
 
+        print("========================AngleNetHandle transformed_image.shape = {}".format(transformed_image.shape))
+        engine_model_name = self.engine_name_template.format(
+            transformed_image.shape[0], transformed_image.shape[2], transformed_image.shape[3])
+        if os.path.isfile(engine_model_name):
+            if self.engine_name == engine_model_name:
+                print("[DEBUG] Already load suitable enflame bin {}".format(engine_model_name))
+            else:
+                self.engine = TopsInference.load(engine_model_name)
+                self.engine_name = engine_model_name
+                print("Find engine file \'{}\'. Skip build engine.".format(
+                    engine_model_name))
+        else:
+            print("Fail to load model file:  {}".format(engine_model_name))
+            onnx_parser = TopsInference.create_parser(TopsInference.ONNX_MODEL)
+            onnx_parser.set_input_dtypes("DT_FLOAT32")
+            onnx_parser.set_input_shapes("1, 3, {}, {}".format(transformed_image.shape[2], transformed_image.shape[3]))
+            onnx_parser.set_input_names("input")
+            onnx_parser.set_output_names("out")
+            module = onnx_parser.read(self.model_path)
+            optimizer = TopsInference.create_optimizer()
+            print("build engine ...")
+            self.engine = optimizer.build(module)
+            print("build engine finished.")
+            self.engine.save_executable(engine_model_name)
+            self.engine_name = engine_model_name
+            print("save engine file: \'{}\'".format(engine_model_name))
 
-        preds = self.sess.run(["out"], {"input": transformed_image.astype(np.float32)})
+        preds = []
+        self.engine.run([transformed_image.astype(np.float32, order='C')], preds,
+                       TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
 
         pred = np.argmax(preds[0])
 
