@@ -80,7 +80,7 @@ class CRNNHandle:
         scale = im.size[1] * 1.0 / 32
         w = im.size[0] / scale
         w = int(w)
-        imgnew = Image.new('RGB', (600, 32), (255))
+        imgnew = Image.new('RGB', (1000, 32), (255))
 
         img = im.resize((w, 32), Image.BILINEAR)
         imgnew.paste(img, (0, 0, w, 32))
@@ -117,7 +117,10 @@ class CRNNHandle:
             self.engine.save_executable(engine_model_name)
             self.engine_name = engine_model_name
             print("save engine file: \'{}\'".format(engine_model_name))
-        preds = self.sess.run(["out"], {"input": transformed_image.astype(np.float32)})
+        preds = []
+        self.engine.run([transformed_image.astype(np.float32, order='C')], preds,
+                       TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
+        # preds = self.sess.run(["out"], {"input": transformed_image.astype(np.float32)})
 
         preds = preds[0]
 

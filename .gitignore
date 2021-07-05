@@ -1,4 +1,7 @@
 # Created by .ignore support plugin (hsz.mobi)
+*.exec
+*.npy
+web_imgs/
 ### Python template
 # Byte-compiled / optimized / DLL files
 __pycache__/
