@@ -48,9 +48,6 @@ class  OcrHandle(object):
         if run_mode == "multiprocessing":
             # input data
             self.queue_input = multiprocessing.Queue(maxsize=1)
-            self.array_shape = multiprocessing.Array('i', 3)
-            self.array_buffer = multiprocessing.Array('I', dbnet_max_size * 960 * 3)
-            # self.quene_raw = multiprocessing.Queue(maxsize=1)
             self.qin_0 = multiprocessing.Queue(maxsize=1)
             self.qin_1 = multiprocessing.Queue(maxsize=1)
             self.qin_2 = multiprocessing.Queue(maxsize=1)
@@ -68,9 +65,7 @@ class  OcrHandle(object):
             self.text_process = multiprocessing.Process(
                 target=self.text_handle.process_mp,
                 args=(
-                    self.queue_input, 
-                    self.array_shape, 
-                    self.array_buffer, 
+                    self.queue_input,
                     self.queues_in, 
                     self.box_count),
                 name="text_detect")
@@ -82,8 +77,6 @@ class  OcrHandle(object):
                     target=self.crnnRecWithBox_mp,
                     args=(
                         i,
-                        self.array_shape, 
-                        self.array_buffer, 
                         self.queues_in[i], 
                         self.queues_out[i],
                         self.box_count),
@@ -116,21 +109,15 @@ class  OcrHandle(object):
                     break
 
 
-    def crnnRecWithBox_mp(self, index, share_shape, share_buffer, qin, qout, box_count):
+    def crnnRecWithBox_mp(self, index, qin, qout, box_count):
         with TopsInference.device(0, index + 1):
             while True:
                 try:
-                    cur_box, cur_socre, count = qin.get()
+                    cur_box, cur_socre, count, input_img = qin.get()
                 except BaseException:
                     print("cluster id:{} exit".format(index + 1))
                     break
                 results = []
-                input_shape = share_shape[:]
-                buffer_len = share_shape[0] * share_shape[1] * share_shape[2]
-                input_data = share_buffer[:buffer_len]
-                input_img = np.array(input_data).reshape(input_shape).astype(np.uint8)
-                # cv2.imshow("shared image", input_img)
-                # cv2.waitKey(0)
                 tmp_box = copy.deepcopy(cur_box)
                 partImg_array = get_rotate_crop_image(input_img, tmp_box.astype(np.float32))
                 print("partImg_array.shape = {}".format(partImg_array.shape))

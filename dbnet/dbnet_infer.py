@@ -56,16 +56,11 @@ class DBNET(metaclass=SingletonType):
             self.engine = TopsInference.PyEngine()
         self.decode_handel = SegDetectorRepresenter()
 
-    def process_mp(self, qimg, share_shape, share_buffer, qin, box_count):
+    def process_mp(self, qimg, qin, box_count):
         with TopsInference.device(0, 0):
             while True:
                 try:
                     input_image = qimg.get()
-                    # cv2.imshow("input image", input_image)
-                    # cv2.waitKey(0)
-                    share_shape[:] = list(input_image.shape)
-                    buffer_len = share_shape[0] * share_shape[1] * share_shape[2]
-                    share_buffer[:buffer_len] = list(input_image.reshape([-1,]))
                 except BaseException:
                     print("get input image failed")
                     break
@@ -149,7 +144,7 @@ class DBNET(metaclass=SingletonType):
                         sorted_score[i] = sorted_score[i + 1]
                         sorted_score[i + 1] = tmp
                 for count in range(num_boxes):
-                        qin[count % 3].put([_boxes[count], sorted_score[count], count])
+                        qin[count % 3].put([_boxes[count], sorted_score[count], count, input_image])
 
     def process(self, img, short_size):
 

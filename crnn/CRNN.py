@@ -170,7 +170,6 @@ class CRNNHandle:
         preds = []
         self.engine.run([transformed_image.astype(np.float32, order='C')], preds,
                        TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
-        # preds = self.sess.run(["out"], {"input": transformed_image.astype(np.float32)})
 
         preds = preds[0]
 
