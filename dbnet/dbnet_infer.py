@@ -44,16 +44,112 @@ def draw_bbox(img_path, result, color=(255, 0, 0), thickness=2):
 
 
 class DBNET(metaclass=SingletonType):
-    def __init__(self, MODEL_PATH):
-        self.sess = rt.InferenceSession(MODEL_PATH)
+    def __init__(self, MODEL_PATH, run_mode, short_size):
+        self.short_size = short_size
         self.engine_name_template = MODEL_PATH.replace('.onnx', '') + \
             ('_bs{{}}_h{{}}_w{{}}_{}.exec').\
             format(TopsInference.__version__.replace(' ', ''))
         self.engine_name = ""
         self.model_path = MODEL_PATH
-        self.handle = TopsInference.set_device(0, 0)
-        self.engine = TopsInference.PyEngine()
+        if run_mode is not "multiprocessing":
+            self.handle = TopsInference.set_device(0, 0)
+            self.engine = TopsInference.PyEngine()
         self.decode_handel = SegDetectorRepresenter()
+
+    def process_mp(self, qimg, share_shape, share_buffer, qin, box_count):
+        with TopsInference.device(0, 0):
+            while True:
+                try:
+                    input_image = qimg.get()
+                    # cv2.imshow("input image", input_image)
+                    # cv2.waitKey(0)
+                    share_shape[:] = list(input_image.shape)
+                    buffer_len = share_shape[0] * share_shape[1] * share_shape[2]
+                    share_buffer[:buffer_len] = list(input_image.reshape([-1,]))
+                except BaseException:
+                    print("get input image failed")
+                    break
+                img = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
+                h, w = img.shape[:2]
+                if h < w:
+                    scale_h = self.short_size / h
+                    tar_w = w * scale_h
+                    tar_w = tar_w - tar_w % 32
+                    tar_w = max(32, tar_w)
+                    scale_w = tar_w / w
+
+                else:
+                    scale_w = self.short_size / w
+                    tar_h = h * scale_w
+                    tar_h = tar_h - tar_h % 32
+                    tar_h = max(32, tar_h)
+                    scale_h = tar_h / h
+                
+                img = cv2.resize(img, None, fx=scale_w, fy=scale_h)
+                img = img.astype(np.float32)
+                img /= 255.0
+                img -= mean
+                img /= std
+                img = img.transpose(2, 0, 1)
+                transformed_image = np.expand_dims(img, axis=0)
+                print("========================DBNET transformed_image.shape = {}".format(transformed_image.shape))
+                engine_model_name = self.engine_name_template.format(
+                    transformed_image.shape[0], transformed_image.shape[2], transformed_image.shape[3])
+                if os.path.isfile(engine_model_name):
+                    if self.engine_name == engine_model_name:
+                        print("[DEBUG] Already load suitable enflame bin {}".format(engine_model_name))
+                    else:
+                        self.engine = TopsInference.load(engine_model_name)
+                        self.engine_name = engine_model_name
+                        print("Find engine file \'{}\'. Skip build engine.".format(
+                            engine_model_name))
+                else:
+                    print("Fail to load model file:  {}".format(engine_model_name))
+                    onnx_parser = TopsInference.create_parser(TopsInference.ONNX_MODEL)
+                    onnx_parser.set_input_dtypes("DT_FLOAT32")
+                    onnx_parser.set_input_shapes("1, 3, {}, {}".format(transformed_image.shape[2], transformed_image.shape[3]))
+                    onnx_parser.set_input_names("input0")
+                    onnx_parser.set_output_names("out1")
+                    module = onnx_parser.read(self.model_path)
+                    optimizer = TopsInference.create_optimizer()
+                    print("build engine ...")
+                    self.engine = optimizer.build(module)
+                    print("build engine finished.")
+                    self.engine.save_executable(engine_model_name)
+                    self.engine_name = engine_model_name
+                    print("save engine file: \'{}\'".format(engine_model_name))
+
+                out = []
+                self.engine.run([transformed_image.astype(np.float32, order='C')], out,
+                            TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
+                box_list, score_list = self.decode_handel(out[0][0], h, w)
+                if len(box_list) > 0:
+                    idx = box_list.reshape(box_list.shape[0], -1).sum(axis=1) > 0  # 去掉全为0的框
+                    box_list, score_list = box_list[idx], score_list[idx]
+                else:
+                    box_list, score_list = [], []
+                print("========================box_list.length = {}".format(len(box_list)))
+                print("========================score_list.length = {}".format(len(score_list)))
+                num_boxes = len(box_list)
+                box_count.value = num_boxes
+                sorted_index =  [x for x,y in sorted(enumerate(box_list), key = lambda x: (x[1][0][1], x[1][0][0]))]
+                # sorted_boxes = sorted(box_list, key=lambda x: (x[0][1], x[0][0]))
+                sorted_boxes = [box_list[i] for i in sorted_index]
+                sorted_score = [score_list[i] for i in sorted_index]
+                _boxes = list(sorted_boxes)
+                print(_boxes)
+
+                for i in range(num_boxes - 1):
+                    if abs(_boxes[i+1][0][1] - _boxes[i][0][1]) < 10 and \
+                        (_boxes[i + 1][0][0] < _boxes[i][0][0]):
+                        tmp = _boxes[i]
+                        _boxes[i] = _boxes[i + 1]
+                        _boxes[i + 1] = tmp
+                        tmp = sorted_score[i]
+                        sorted_score[i] = sorted_score[i + 1]
+                        sorted_score[i + 1] = tmp
+                for count in range(num_boxes):
+                        qin[count % 3].put([_boxes[count], sorted_score[count], count])
 
     def process(self, img, short_size):
 
@@ -115,14 +211,14 @@ class DBNET(metaclass=SingletonType):
         self.engine.run([transformed_image.astype(np.float32, order='C')], out,
                        TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
         box_list, score_list = self.decode_handel(out[0][0], h, w)
-        print("========================box_list.length = {}".format(len(box_list)))
-        print(box_list)
-        print("========================score_list.length = {}".format(len(score_list)))
         if len(box_list) > 0:
             idx = box_list.reshape(box_list.shape[0], -1).sum(axis=1) > 0  # 去掉全为0的框
             box_list, score_list = box_list[idx], score_list[idx]
         else:
             box_list, score_list = [], []
+        print("========================box_list.length = {}".format(len(box_list)))
+        # print(box_list)
+        print("========================score_list.length = {}".format(len(score_list)))
         return box_list, score_list
 
 

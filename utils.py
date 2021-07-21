@@ -130,9 +130,9 @@ def sorted_boxes(dt_boxes):
     return:
         sorted boxes(array) with shape [4, 2]
     """
-    num_boxes = dt_boxes.shape[0]
+    num_boxes = len(dt_boxes)
     sorted_boxes = sorted(dt_boxes, key=lambda x: (x[0][1], x[0][0]))
-    _boxes = list(sorted_boxes)
+    _boxes = sorted_boxes
 
     for i in range(num_boxes - 1):
         if abs(_boxes[i+1][0][1] - _boxes[i][0][1]) < 10 and \

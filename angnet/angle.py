@@ -7,19 +7,62 @@ import time
 import os
 
 class AngleNetHandle:
-    def __init__(self, model_path,size_h = 32, size_w = 192):
+    def __init__(self, model_path, run_mode, size_h = 32, size_w = 192):
 
         self.sess = rt.InferenceSession(model_path)
         self.engine_name_template = model_path.replace('.onnx', '') + \
             ('_bs{{}}_h{{}}_w{{}}_{}.exec').\
             format(TopsInference.__version__.replace(' ', ''))
-        self.engine_name = ""
         self.model_path = model_path
         print("Create AngleNet enflame binary template {}".format(self.engine_name_template))
-        self.handle = TopsInference.set_device(0, 0)
-        self.engine = TopsInference.PyEngine()
-        self.size_h = size_h
-        self.size_w = size_w
+        if run_mode == "multiprocessing":
+            self.engine_dict = {}
+        else:
+            self.engine_name = ""
+            self.handle = TopsInference.set_device(0, 0)
+            self.engine = TopsInference.PyEngine()
+            self.size_h = size_h
+            self.size_w = size_w
+
+    def predict_rbg_mp(self, transformed_image):
+        """
+        预测
+        """
+        print("[INFO] ========================AngleNetHandle transformed_image.shape = {}".format(transformed_image.shape))
+        engine_model_name = self.engine_name_template.format(
+            transformed_image.shape[0], transformed_image.shape[2], transformed_image.shape[3])
+        eigine_key = "bs{}_h{}_w{}".format(transformed_image.shape[0], 
+            transformed_image.shape[2], transformed_image.shape[3])
+        if os.path.isfile(engine_model_name):
+            if eigine_key in self.engine_dict:
+                print("[INFO] Already load suitable enflame bin {}".format(engine_model_name))
+            else:
+                self.engine_dict[eigine_key] = TopsInference.load(engine_model_name)
+                print("[INFO] Find engine file \'{}\'. Skip build engine.".format(
+                    engine_model_name))
+        else:
+            print("[INFO] Fail to load model file:  {}".format(engine_model_name))
+            onnx_parser = TopsInference.create_parser(TopsInference.ONNX_MODEL)
+            onnx_parser.set_input_dtypes("DT_FLOAT32")
+            onnx_parser.set_input_shapes("1, 3, {}, {}".format(transformed_image.shape[2], transformed_image.shape[3]))
+            onnx_parser.set_input_names("input")
+            onnx_parser.set_output_names("out")
+            module = onnx_parser.read(self.model_path)
+            optimizer = TopsInference.create_optimizer()
+            print("[INFO] build engine ...")
+            self.engine_dict[eigine_key] = optimizer.build(module)
+            print("[INFO] build engine finished.")
+            self.engine_dict[eigine_key].save_executable(engine_model_name)
+            print("[INFO] save engine file: \'{}\'".format(engine_model_name))
+
+        preds = []
+        self.engine_dict[eigine_key].run([transformed_image.astype(np.float32, order='C')], preds,
+                       TopsInference.TIF_ENGINE_RSC_IN_HOST_OUT_HOST)
+
+        pred = (np.argmax(preds[0]) == 0)
+
+        return pred
+
 
     def predict_rbg(self, im):
         """
